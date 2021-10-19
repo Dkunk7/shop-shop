@@ -11,6 +11,7 @@ import {
 import Cart from '../components/Cart';
 import { QUERY_PRODUCTS } from '../utils/queries';
 import spinner from '../assets/spinner.gif';
+import { idbPromise } from "../utils/helpers";
 
 function Detail() {
   const [state, dispatch] = useStoreContext();
@@ -23,15 +24,31 @@ function Detail() {
   const { products, cart } = state
 
   useEffect(() => {
+    // already in global store
     if (products.length) {
       setCurrentProduct(products.find((product) => product._id === id));
-    } else if (data) { // if there's no product with an id that matches in the above statement, run dispatch to update the global state, which make useEffect run again and find the new data to match
+    } 
+    // retrieved from server
+    else if (data) { // if there's no product with an id that matches in the above statement, run dispatch to update the global state, which make useEffect run again and find the new data to match
       dispatch({
         type: UPDATE_PRODUCTS,
         products: data.products
       });
+
+      data.products.forEach((product) => {
+        idbPromise('products', 'put', product);
+      });
     }
-  }, [products, data, dispatch, id]); // this second argument is called the dependency array
+    // get cache from idb
+    else if (!loading) {
+      idbPromise('products', 'get').then((indexedProducts) => {
+        dispatch({
+          type: UPDATE_PRODUCTS,
+          products: indexedProducts
+        });
+      });
+    }
+  }, [products, data, loading, dispatch, id]); // this second argument is called the dependency array
 
   const addToCart = () => {
     const itemInCart = cart.find((cartItem) => cartItem._id === id);
@@ -42,11 +59,18 @@ function Detail() {
         _id: id,
         purchaseQuantity: parseInt(itemInCart.purchaseQuantity) + 1
       });
+      // if quantity is being updated, use existing item data and increment pruchaseQuantity value by one
+      idbPromise('cart', 'put', {
+        ...itemInCart,
+        purchaseQuantity: parseInt(itemInCart.purchaseQuantity) + 1
+      });
     } else {
       dispatch({
         type: ADD_TO_CART,
         product: { ...currentProduct, purchaseQuantity: 1 }
       });
+      // if product isn't in the car yet, add it to the current shopping cart in indexedDB
+      idbPromise('cart', 'put', { ...currentProduct, purchaseQuantity: 1 });
     }
   };
 
@@ -55,6 +79,9 @@ function Detail() {
       type: REMOVE_FROM_CART,
       _id: currentProduct._id
     });
+
+    // upon removal from cart, delete the item from indexedDB using the 'currentProduct._id' to locate what to remove
+    idbPromise('cart', 'delete', { ...currentProduct });
   };
 
   return (
